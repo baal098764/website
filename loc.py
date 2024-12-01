@@ -1,104 +1,120 @@
 import streamlit as st
+import zipfile
 import os
-from pathlib import Path
-from zipfile import ZipFile
-import shutil
+import filestack
+import asyncio
+import aiohttp
+from aiohttp import ClientSession
 
-# Allowed file extensions
-IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
-VIDEO_EXTENSIONS = [".mp4", ".avi", ".mov", ".wmv", ".mkv"]
+# Initialize Filestack client with your API key
+api_key = 'AtZbM0JMeTIip2ONkRgqVz'  # Replace with your actual Filestack API key
+client = filestack.Client(api_key)
 
-# Directory to save uploaded files
-UPLOAD_DIR = "uploaded_files"
+# Function to extract files from ZIP
+def extract_zip(zip_file):
+    extracted_files = []
+    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+        zip_ref.extractall("extracted_files")
+        extracted_files = zip_ref.namelist()
+        print(f"Debug: Extracted files from ZIP: {extracted_files}")
+    return extracted_files
 
-# Helper: Check if a file is an image
-def is_image(file_path: str) -> bool:
-    return any(file_path.lower().endswith(ext) for ext in IMAGE_EXTENSIONS)
+# Function to upload files to Filestack (asynchronous)
+async def upload_to_filestack(session, file_path):
+    print(f"Debug: Uploading file: {file_path}")
+    file = {'fileUpload': open(file_path, 'rb')}
+    url = 'https://www.filestackapi.com/api/store/S3?key=' + api_key  # Filestack S3 store endpoint
 
-# Helper: Check if a file is a video
-def is_video(file_path: str) -> bool:
-    return any(file_path.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+    async with session.post(url, data=file) as response:
+        result = await response.json()
+        print(f"Debug: File uploaded. URL: {result['url']}")
+        return result['url']
 
-# Helper: Save URLs to a text file
-def save_to_txt(file_name: str, urls: list):
-    with open(file_name, "w") as f:
-        f.writelines(f"{url}\n" for url in urls)
+# Function to run asynchronous tasks
+async def process_uploads(files):
+    async with ClientSession() as session:
+        tasks = []
+        for file_path in files:
+            tasks.append(upload_to_filestack(session, file_path))
+        image_urls = await asyncio.gather(*tasks)
+        return image_urls
 
-# Ensure the upload directory exists
-Path(UPLOAD_DIR).mkdir(exist_ok=True)
+# Streamlit UI
+st.title("ZIP File Upload and Media URL Generator")
 
-# Streamlit app
-st.title("File Upload to Embed URLs")
-st.write("Upload images, videos, or ZIP files to generate embeddable URLs.")
+# Upload ZIP file
+zip_file = st.file_uploader("Upload a ZIP file", type=["zip"])
 
-uploaded_files = st.file_uploader(
-    "Upload Images/Videos/ZIP Files",
-    type=["jpg", "jpeg", "png", "gif", "bmp", "webp", "mp4", "avi", "mov", "wmv", "zip"],
-    accept_multiple_files=True
-)
+if zip_file is not None:
+    print("Debug: ZIP file uploaded.")
+    
+    # Save the uploaded ZIP file temporarily
+    with open("temp.zip", "wb") as temp_file:
+        temp_file.write(zip_file.getbuffer())
+    print("Debug: ZIP file saved as temp.zip.")
 
-# Static directory to serve uploaded files
-STATIC_DIR = Path("static")
-STATIC_DIR.mkdir(exist_ok=True)
-
-# Hosting URL (replace this with your actual hosting URL)
-BASE_URL = "https://embedurls.streamlit.app"  # Update this to match your app's URL
-
-if uploaded_files:
-    st.info("Processing uploaded files...")
+    # Extract the ZIP file
+    extracted_files = extract_zip("temp.zip")
+    
+    # Lists to store image and video URLs
     image_urls = []
     video_urls = []
 
-    for uploaded_file in uploaded_files:
-        file_path = STATIC_DIR / uploaded_file.name
+    # Prepare file paths for upload
+    files_to_upload = []
 
-        # Save the file
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        if file_path.suffix.lower() == ".zip":
-            # Extract ZIP file contents
-            with ZipFile(file_path, 'r') as zip_ref:
-                extract_dir = STATIC_DIR / f"{file_path.stem}_extracted"
-                extract_dir.mkdir(exist_ok=True)
-                zip_ref.extractall(extract_dir)
-
-                # Process extracted files
-                for root, _, files in os.walk(extract_dir):
-                    for file in files:
-                        extracted_file_path = Path(root) / file
-                        if is_image(str(extracted_file_path)):
-                            image_urls.append(f"/static/{extracted_file_path.relative_to(STATIC_DIR)}")
-                        elif is_video(str(extracted_file_path)):
-                            video_urls.append(f"/static/{extracted_file_path.relative_to(STATIC_DIR)}")
+    # Process extracted files and prepare file paths
+    for file_name in extracted_files:
+        file_path = os.path.join("extracted_files", file_name)
+        print(f"Debug: Processing file: {file_name}")
+        
+        # Check if file is an image or video
+        if file_name.lower().endswith(('jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff')):
+            print(f"Debug: File is an image: {file_name}")
+            files_to_upload.append(file_path)
+        elif file_name.lower().endswith(('mp4', 'avi', 'mov', 'mkv', 'webm')):
+            print(f"Debug: File is a video: {file_name}")
+            video_urls.append(file_path)  # Video URLs will be handled separately or uploaded in future
         else:
-            if is_image(str(file_path)):
-                image_urls.append(f"/static/{file_path.relative_to(STATIC_DIR)}")
-            elif is_video(str(file_path)):
-                video_urls.append(f"/static/{file_path.relative_to(STATIC_DIR)}")
+            print(f"Debug: Skipping unsupported file type: {file_name}")
 
-    # Save URLs to text files (full URLs with hosting base URL)
-    save_to_txt(STATIC_DIR / "images.txt", [f"{BASE_URL}{url}" for url in image_urls])
-    save_to_txt(STATIC_DIR / "videos.txt", [f"{BASE_URL}{url}" for url in video_urls])
+    # If there are images, upload them asynchronously
+    if files_to_upload:
+        print(f"Debug: Uploading {len(files_to_upload)} images asynchronously...")
+        image_urls = asyncio.run(process_uploads(files_to_upload))
 
-    # Display image URLs
-    st.success("Processing complete!")
-    st.subheader("Generated Image URLs:")
-    for url in image_urls:
-        st.image(f"{BASE_URL}{url}", use_container_width=True)
+    # Display image URLs in the Streamlit UI
+    if image_urls:
+        st.subheader("Image URLs")
+        # Display image URLs in a scrollable text box
+        st.text_area("Image URLs", "\n".join(image_urls), height=300)
 
-    # Display video URLs
-    st.subheader("Generated Video URLs:")
-    for url in video_urls:
-        st.video(f"{BASE_URL}{url}")
-        st.write(f"Video URL: {BASE_URL}{url}")
+    # Prepare image URL text file
+    if image_urls:
+        with open("images.txt", "w") as img_file:
+            for url in image_urls:
+                img_file.write(url + "\n")
+        print("Debug: Image URLs saved to images.txt.")
 
-    # Provide download links for text files
-    st.download_button("Download Image URLs (images.txt)", data="\n".join([f"{BASE_URL}{url}" for url in image_urls]), file_name="images.txt")
-    st.download_button("Download Video URLs (videos.txt)", data="\n".join([f"{BASE_URL}{url}" for url in video_urls]), file_name="videos.txt")
+        # Provide download button for the text file
+        with open("images.txt", "rb") as img_file:
+            st.download_button("Download images.txt", img_file, "images.txt")
+            print("Debug: Ready to download images.txt.")
 
-# Clear Uploads button
-if st.button("Clear Uploads"):
-    shutil.rmtree(STATIC_DIR)  # Remove the static directory and all files inside it
-    STATIC_DIR.mkdir(exist_ok=True)  # Recreate the static directory
-    st.info("Static files cleared.")
+    # Display video URLs (if needed, you can upload videos similarly)
+    if video_urls:
+        st.subheader("Video URLs")
+        # Display video URLs in a scrollable text box
+        st.text_area("Video URLs", "\n".join(video_urls), height=300)
+
+    # Prepare video URL text file (if needed)
+    if video_urls:
+        with open("videos.txt", "w") as vid_file:
+            for url in video_urls:
+                vid_file.write(url + "\n")
+        print("Debug: Video URLs saved to videos.txt.")
+
+        # Provide download button for the text file
+        with open("videos.txt", "rb") as vid_file:
+            st.download_button("Download videos.txt", vid_file, "videos.txt")
+            print("Debug: Ready to download videos.txt.")
