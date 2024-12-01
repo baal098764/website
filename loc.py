@@ -7,7 +7,7 @@ import aiohttp
 from aiohttp import ClientSession
 
 # Initialize Filestack client with your API key
-api_key = 'AtZbM0JMeTIip2ONkRgqVz'  # Replace with your actual Filestack API key
+api_key = 'Aiqntc17mToilRmrr1LDbz'  # Replace with your actual Filestack API key
 client = filestack.Client(api_key)
 
 # Function to extract files from ZIP
