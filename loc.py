@@ -36,8 +36,8 @@ async def process_uploads(files):
         tasks = []
         for file_path in files:
             tasks.append(upload_to_filestack(session, file_path))
-        image_urls = await asyncio.gather(*tasks)
-        return image_urls
+        uploaded_urls = await asyncio.gather(*tasks)
+        return uploaded_urls
 
 # Streamlit UI
 st.title("ZIP File Upload and Media URL Generator")
@@ -74,14 +74,21 @@ if zip_file is not None:
             files_to_upload.append(file_path)
         elif file_name.lower().endswith(('mp4', 'avi', 'mov', 'mkv', 'webm')):
             print(f"Debug: File is a video: {file_name}")
-            video_urls.append(file_path)  # Video URLs will be handled separately or uploaded in future
+            files_to_upload.append(file_path)  # Video files will be uploaded as well
         else:
             print(f"Debug: Skipping unsupported file type: {file_name}")
 
-    # If there are images, upload them asynchronously
+    # If there are files (images/videos), upload them asynchronously
     if files_to_upload:
-        print(f"Debug: Uploading {len(files_to_upload)} images asynchronously...")
-        image_urls = asyncio.run(process_uploads(files_to_upload))
+        print(f"Debug: Uploading {len(files_to_upload)} files asynchronously...")
+        uploaded_urls = asyncio.run(process_uploads(files_to_upload))
+
+        # Separate image and video URLs
+        for url in uploaded_urls:
+            if any(url.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']):
+                image_urls.append(url)
+            elif any(url.endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm']):
+                video_urls.append(url)
 
     # Display image URLs in the Streamlit UI
     if image_urls:
@@ -101,13 +108,13 @@ if zip_file is not None:
             st.download_button("Download images.txt", img_file, "images.txt")
             print("Debug: Ready to download images.txt.")
 
-    # Display video URLs (if needed, you can upload videos similarly)
+    # Display video URLs
     if video_urls:
         st.subheader("Video URLs")
         # Display video URLs in a scrollable text box
         st.text_area("Video URLs", "\n".join(video_urls), height=300)
 
-    # Prepare video URL text file (if needed)
+    # Prepare video URL text file
     if video_urls:
         with open("videos.txt", "w") as vid_file:
             for url in video_urls:
