@@ -42,7 +42,7 @@ STATIC_DIR = Path("static")
 STATIC_DIR.mkdir(exist_ok=True)
 
 # Hosting URL (replace this with your actual hosting URL)
-BASE_URL = "https://embedurls.streamlit.app"  # Make sure to update this for public access
+BASE_URL = "https://embedurls.streamlit.app"  # Update this to match your app's URL
 
 if uploaded_files:
     st.info("Processing uploaded files...")
