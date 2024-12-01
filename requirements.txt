@@ -1,2 +1,3 @@
+filestack-python
 streamlit
 
