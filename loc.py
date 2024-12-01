@@ -30,7 +30,7 @@ async def upload_to_filestack(session, file_path):
         print(f"Debug: File uploaded. URL: {result['url']}")
         return result['url']
 
-# Function to run asynchronous tasks
+# Function to run asynchronous tasks for file uploads
 async def process_uploads(files):
     async with ClientSession() as session:
         tasks = []
@@ -39,16 +39,30 @@ async def process_uploads(files):
         image_urls = await asyncio.gather(*tasks)
         return image_urls
 
-# Function to delete all files from Filestack storage
+# Function to delete all files in Filestack
 async def delete_all_files():
     url = f'https://www.filestackapi.com/api/async/file?key={api_key}'
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            result = await response.json()
-            file_ids = [file['handle'] for file in result['files']]  # Extract file handles
+            response_text = await response.text()  # Get raw text response
+            print(f"Debug: Response from Filestack: {response_text}")
+
+            # Check for the correct content type
+            if 'application/json' not in response.content_type:
+                print(f"Error: Unexpected response content type: {response.content_type}")
+                return 0  # Return early if the content type is incorrect
+
+            result = await response.json()  # Attempt to decode JSON if the type is correct
+            file_ids = [file['handle'] for file in result['files']]  # Get file handles
+
+            # Prepare deletion tasks
             delete_tasks = [session.delete(f'https://www.filestackapi.com/api/file/{file_id}?key={api_key}') for file_id in file_ids]
-            await asyncio.gather(*delete_tasks)
-            return len(file_ids)
+
+            # Delete files and gather responses
+            delete_responses = await asyncio.gather(*delete_tasks)
+
+            # Return the count of deleted files
+            return len(delete_responses)
 
 # Streamlit UI
 st.title("ZIP File Upload and Media URL Generator")
@@ -133,5 +147,5 @@ if zip_file is not None:
 # Add a button to delete all media files in Filestack
 if st.button("Delete All Media in Filestack"):
     st.write("Deleting all media files from Filestack...")
-    deleted_count = asyncio.run(delete_all_files())  # Run the deletion task asynchronously
+    deleted_count = asyncio.run(delete_all_files())  # Run the deletion function asynchronously
     st.write(f"Successfully deleted {deleted_count} media files.")
